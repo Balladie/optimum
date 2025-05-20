@@ -1381,3 +1381,94 @@ class VitPoseModelPatcher(ModelPatcher):
             model_kwargs["dataset_index"] = torch.tensor(0, device=model.device)
 
         super().__init__(config, model, model_kwargs)
+
+
+class ColPaliModelPatcher(ModelPatcher):
+    def __init__(
+        self,
+        config: "OnnxConfig",
+        model: Union["PreTrainedModel", "TFPreTrainedModel"],
+        model_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(config, model, model_kwargs)
+
+        if config.variant == "vision":
+            @functools.wraps(self.orig_forward)
+            def patched_forward(
+                input_ids: Optional[torch.LongTensor] = None,
+                pixel_values: Optional[torch.FloatTensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                output_attentions: Optional[bool] = None,
+                output_hidden_states: Optional[bool] = None,
+                return_dict: Optional[bool] = None,
+                **kwargs,
+            ):
+                inputs_embeds = model.vlm.get_input_embeddings()(input_ids)
+                image_features = model.vlm.get_image_features(pixel_values)
+
+                special_image_mask = (input_ids == model.vlm.config.image_token_index).unsqueeze(-1)
+                special_image_mask = special_image_mask.expand_as(inputs_embeds).to(inputs_embeds.device)
+
+                image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
+                inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
+
+                return {
+                    "inputs_embeds": inputs_embeds,
+                }
+
+            self.patched_forward = patched_forward
+        elif config.variant == "text":
+            @functools.wraps(self.orig_forward)
+            def patched_forward(
+                input_ids: Optional[torch.LongTensor] = None,
+                pixel_values: Optional[torch.FloatTensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                output_attentions: Optional[bool] = None,
+                output_hidden_states: Optional[bool] = None,
+                return_dict: Optional[bool] = None,
+                **kwargs,
+            ):
+                inputs_embeds = model.vlm.get_input_embeddings()(input_ids)
+
+                return {
+                    "inputs_embeds": inputs_embeds,
+                }
+
+            self.patched_forward = patched_forward
+        else:
+            def patched_forward(
+                input_ids: Optional[torch.LongTensor] = None,
+                pixel_values: Optional[torch.FloatTensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                inputs_embeds: Optional[torch.FloatTensor] = None,
+                output_attentions: Optional[bool] = None,
+                output_hidden_states: Optional[bool] = None,
+                return_dict: Optional[bool] = None,
+                **kwargs,
+            ):
+                output_attentions = model.config.output_attentions
+
+                return_dict = model.config.use_return_dict
+
+                outputs = model.vlm(
+                    attention_mask=attention_mask,
+                    inputs_embeds=inputs_embeds,
+                    output_hidden_states=True,
+                    return_dict=return_dict,
+                    output_attentions=output_attentions,
+                    **kwargs,
+                )
+
+                last_hidden_states = outputs.hidden_states[-1]  # (batch_size, sequence_length, hidden_size)
+                embeddings = model.embedding_proj_layer(last_hidden_states)  # (batch_size, sequence_length, dim)
+
+                # L2 normalization
+                embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)  # (batch_size, sequence_length, dim)
+
+                embeddings = embeddings * attention_mask.unsqueeze(-1)  # (batch_size, sequence_length, dim)
+
+                return {
+                    "embeddings": embeddings,
+                }
+
+            self.patched_forward = patched_forward

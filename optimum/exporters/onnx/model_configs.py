@@ -88,6 +88,7 @@ from .config import (
 from .constants import ONNX_DECODER_MERGED_NAME, ONNX_DECODER_NAME, ONNX_DECODER_WITH_PAST_NAME
 from .model_patcher import (
     CLIPModelPatcher,
+    ColPaliModelPatcher,
     FalconModelPatcher,
     MgpstrModelPatcher,
     MistralModelPatcher,
@@ -2708,6 +2709,7 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
     VARIANTS = {
         "vision": "Embedding extraction for image.",
         "text": "Embedding extraction for text.",
+        "language": "Decoder model.",
     }
     DEFAULT_VARIANT = "vision"
 
@@ -2717,20 +2719,29 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
         if self.variant == "vision":
             return {
                 "input_ids": dynamic_axis,
-                "attention_mask": dynamic_axis,
                 "pixel_values": {0: "batch_size"},
+            }
+        elif self.variant == "text":
+            return {
+                "input_ids": dynamic_axis,
             }
         else:
             return {
-                "input_ids": dynamic_axis,
+                "inputs_embeds": dynamic_axis,
                 "attention_mask": dynamic_axis,
             }
 
     @property
     def outputs(self) -> Dict[str, Dict[int, str]]:
-        return {
-            "embeddings": {0: "batch_size", 1: "sequence_length"},
-        }
+        dynamic_axis = {0: "batch_size", 1: "sequence_length"}
+        if self.variant == "language":
+            return {
+                "embeddings": dynamic_axis,
+            }
+        else:
+            return {
+                "inputs_embeds": dynamic_axis,
+            }
 
     def generate_dummy_inputs(self, framework: str = "pt", **kwargs):
         _, generator_image = self._create_dummy_input_generator_classes(**kwargs)
@@ -2743,7 +2754,8 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
             else:
                 kwargs["sequence_length"] = DEFAULT_DUMMY_SHAPES["sequence_length"] + num_image_tokens
 
-        dummy_inputs = super().generate_dummy_inputs(framework=framework, **kwargs)
+        if self.variant != "language":
+            dummy_inputs = super().generate_dummy_inputs(framework=framework, **kwargs)
 
         if framework == "pt":
             if self.variant == "vision":
@@ -2754,4 +2766,25 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
                     int_dtype=self.int_dtype,
                     float_dtype=self.float_dtype,
                 )
+            elif self.variant == "language":
+                dummy_inputs = {
+                    "inputs_embeds": generator_image.random_float_tensor(
+                        (
+                            DEFAULT_DUMMY_SHAPES["batch_size"],
+                            DEFAULT_DUMMY_SHAPES["sequence_length"],
+                            self._normalized_config.text_config.hidden_size,
+                        ),
+                        dtype=self.float_dtype,
+                    ),
+                    "attention_mask": generator_image.random_mask_tensor(
+                        (
+                            DEFAULT_DUMMY_SHAPES["batch_size"],
+                            DEFAULT_DUMMY_SHAPES["sequence_length"],
+                        ),
+                        dtype=self.int_dtype,
+                    ),
+                }
         return dummy_inputs
+
+    def patch_model_for_export(self, model, model_kwargs = None):
+        return ColPaliModelPatcher(self, model, model_kwargs)
