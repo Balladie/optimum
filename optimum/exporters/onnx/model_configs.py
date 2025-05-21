@@ -2757,33 +2757,26 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
         if self.variant != "language":
             dummy_inputs = super().generate_dummy_inputs(framework=framework, **kwargs)
 
-        if framework == "pt":
-            if self.variant == "vision":
-                dummy_inputs["input_ids"][:, :num_image_tokens] = image_token_index
-                dummy_inputs["pixel_values"] = generator_image.generate(
-                    input_name="pixel_values",
-                    framework=framework,
-                    int_dtype=self.int_dtype,
-                    float_dtype=self.float_dtype,
-                )
-            elif self.variant == "language":
-                dummy_inputs = {
-                    "inputs_embeds": generator_image.random_float_tensor(
-                        (
-                            DEFAULT_DUMMY_SHAPES["batch_size"],
-                            DEFAULT_DUMMY_SHAPES["sequence_length"],
-                            self._normalized_config.text_config.hidden_size,
-                        ),
-                        dtype=self.float_dtype,
+        if self.variant == "vision":
+            dummy_inputs["input_ids"][:, :num_image_tokens] = image_token_index
+        elif self.variant == "language":
+            dummy_inputs = {
+                "inputs_embeds": generator_image.random_float_tensor(
+                    (
+                        DEFAULT_DUMMY_SHAPES["batch_size"],
+                        DEFAULT_DUMMY_SHAPES["sequence_length"],
+                        self._normalized_config.text_config.hidden_size,
                     ),
-                    "attention_mask": generator_image.random_mask_tensor(
-                        (
-                            DEFAULT_DUMMY_SHAPES["batch_size"],
-                            DEFAULT_DUMMY_SHAPES["sequence_length"],
-                        ),
-                        dtype=self.int_dtype,
+                    dtype=self.float_dtype,
+                ),
+                "attention_mask": generator_image.random_mask_tensor(
+                    (
+                        DEFAULT_DUMMY_SHAPES["batch_size"],
+                        DEFAULT_DUMMY_SHAPES["sequence_length"],
                     ),
-                }
+                    dtype=self.int_dtype,
+                ),
+            }
         return dummy_inputs
 
     def patch_model_for_export(self, model, model_kwargs = None):
