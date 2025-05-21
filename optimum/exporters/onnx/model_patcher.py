@@ -1392,17 +1392,17 @@ class ColPaliModelPatcher(ModelPatcher):
     ):
         super().__init__(config, model, model_kwargs)
 
-        if config.variant == "vision":
-            @functools.wraps(self.orig_forward)
-            def patched_forward(
-                input_ids: Optional[torch.LongTensor] = None,
-                pixel_values: Optional[torch.FloatTensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                output_attentions: Optional[bool] = None,
-                output_hidden_states: Optional[bool] = None,
-                return_dict: Optional[bool] = None,
-                **kwargs,
-            ):
+        def patched_forward(
+            input_ids: Optional[torch.LongTensor] = None,
+            pixel_values: Optional[torch.FloatTensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            **kwargs,
+        ):
+            if config.variant == "vision":
                 inputs_embeds = model.vlm.get_input_embeddings()(input_ids)
                 image_features = model.vlm.get_image_features(pixel_values)
 
@@ -1412,40 +1412,12 @@ class ColPaliModelPatcher(ModelPatcher):
                 image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
                 inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
 
-                return {
-                    "inputs_embeds": inputs_embeds,
-                }
-
-            self.patched_forward = patched_forward
-        elif config.variant == "text":
-            @functools.wraps(self.orig_forward)
-            def patched_forward(
-                input_ids: Optional[torch.LongTensor] = None,
-                pixel_values: Optional[torch.FloatTensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                output_attentions: Optional[bool] = None,
-                output_hidden_states: Optional[bool] = None,
-                return_dict: Optional[bool] = None,
-                **kwargs,
-            ):
+                return {"inputs_embeds": inputs_embeds}
+            elif config.variant == "text":
                 inputs_embeds = model.vlm.get_input_embeddings()(input_ids)
 
-                return {
-                    "inputs_embeds": inputs_embeds,
-                }
-
-            self.patched_forward = patched_forward
-        else:
-            def patched_forward(
-                input_ids: Optional[torch.LongTensor] = None,
-                pixel_values: Optional[torch.FloatTensor] = None,
-                attention_mask: Optional[torch.Tensor] = None,
-                inputs_embeds: Optional[torch.FloatTensor] = None,
-                output_attentions: Optional[bool] = None,
-                output_hidden_states: Optional[bool] = None,
-                return_dict: Optional[bool] = None,
-                **kwargs,
-            ):
+                return {"inputs_embeds": inputs_embeds}
+            else:
                 output_attentions = model.config.output_attentions
 
                 return_dict = model.config.use_return_dict
@@ -1467,8 +1439,6 @@ class ColPaliModelPatcher(ModelPatcher):
 
                 embeddings = embeddings * attention_mask.unsqueeze(-1)  # (batch_size, sequence_length, dim)
 
-                return {
-                    "embeddings": embeddings,
-                }
+                return {"embeddings": embeddings}
 
-            self.patched_forward = patched_forward
+        self.patched_forward = patched_forward
