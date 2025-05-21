@@ -1403,19 +1403,10 @@ class ColPaliModelPatcher(ModelPatcher):
             **kwargs,
         ):
             if config.variant == "vision":
-                inputs_embeds = model.vlm.get_input_embeddings()(input_ids)
                 image_features = model.vlm.get_image_features(pixel_values)
-
-                special_image_mask = (input_ids == model.vlm.config.image_token_index).unsqueeze(-1)
-                special_image_mask = special_image_mask.expand_as(inputs_embeds).to(inputs_embeds.device)
-
-                image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
-                inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features)
-
-                return {"inputs_embeds": inputs_embeds}
-            elif config.variant == "text":
+                return {"image_features": image_features}
+            elif config.variant == "embed":
                 inputs_embeds = model.vlm.get_input_embeddings()(input_ids)
-
                 return {"inputs_embeds": inputs_embeds}
             else:
                 output_attentions = model.config.output_attentions

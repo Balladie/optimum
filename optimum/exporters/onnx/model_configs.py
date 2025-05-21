@@ -2707,9 +2707,9 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
     ATOL_FOR_VALIDATION = 1e-4
 
     VARIANTS = {
-        "vision": "Embedding extraction for image.",
-        "text": "Embedding extraction for text.",
-        "language": "Decoder model.",
+        "vision": "Vision encoder model.",
+        "embed": "Embedding token extraction.",
+        "decoder": "Decoder model.",
     }
     DEFAULT_VARIANT = "vision"
 
@@ -2718,10 +2718,9 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
         dynamic_axis = {0: "batch_size", 1: "sequence_length"}
         if self.variant == "vision":
             return {
-                "input_ids": dynamic_axis,
                 "pixel_values": {0: "batch_size"},
             }
-        elif self.variant == "text":
+        elif self.variant == "embed":
             return {
                 "input_ids": dynamic_axis,
             }
@@ -2734,32 +2733,22 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
     @property
     def outputs(self) -> Dict[str, Dict[int, str]]:
         dynamic_axis = {0: "batch_size", 1: "sequence_length"}
-        if self.variant == "language":
+        if self.variant == "vision":
             return {
-                "embeddings": dynamic_axis,
+                "image_features": {0: "batch_size"},
+            }
+        elif self.variant == "embed":
+            return {
+                "inputs_embeds": dynamic_axis,
             }
         else:
             return {
-                "inputs_embeds": dynamic_axis,
+                "embeddings": dynamic_axis,
             }
 
     def generate_dummy_inputs(self, framework: str = "pt", **kwargs):
         _, generator_image = self._create_dummy_input_generator_classes(**kwargs)
-
-        if self.variant == "vision":
-            image_token_index = self._normalized_config.vlm_config.image_token_index
-            num_image_tokens = self._normalized_config.vision_config.num_image_tokens
-            if "sequence_length" in kwargs:
-                kwargs["sequence_length"] += num_image_tokens
-            else:
-                kwargs["sequence_length"] = DEFAULT_DUMMY_SHAPES["sequence_length"] + num_image_tokens
-
-        if self.variant != "language":
-            dummy_inputs = super().generate_dummy_inputs(framework=framework, **kwargs)
-
-        if self.variant == "vision":
-            dummy_inputs["input_ids"][:, :num_image_tokens] = image_token_index
-        elif self.variant == "language":
+        if self.variant == "decoder":
             dummy_inputs = {
                 "inputs_embeds": generator_image.random_float_tensor(
                     (
@@ -2777,6 +2766,8 @@ class ColPaliOnnxConfig(GemmaOnnxConfig):
                     dtype=self.int_dtype,
                 ),
             }
+        else:
+            dummy_inputs = super().generate_dummy_inputs(framework=framework, **kwargs)
         return dummy_inputs
 
     def patch_model_for_export(self, model, model_kwargs = None):
